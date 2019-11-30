@@ -80,45 +80,6 @@ local_hosts <-
   filter(city_region %in% city_region_valid) %>% 
   rename(total_local_listings = n)
 
-## Calculate only local hosts 
-# Something goes wrong here - after the 2nd left_join df has 14991 rows, but
-# one implementing the 2nd filter, it becomes almost the same # of rows as 
-# local_hosts, and the summarize gives unique host_ID length of one less than
-# total_local_listings for each row. So these numbers don't make sense.
-
-only_local_hosts <- 
-  ML_property %>% 
-  filter(created <= "2019-09-30", scraped >= "2019-09-30") %>% 
-  count(host_ID, city, region) %>% 
-  left_join(ML_hosts_with_city) %>% 
-  left_join(local_hosts, na.rm = TRUE) %>% 
-  filter(total_host_listings == total_local_listings) %>% 
-  group_by(city, region) %>% 
-  summarize(only_local_hosts = length(unique(host_ID)))
-
-## Property output 
-
-property_output <- 
-  property_cities %>% 
-  filter(created <= "2019-09-30", scraped >= "2019-09-30") %>% 
-  mutate(city_region = paste(city, region, sep = ", ")) %>% 
-  filter(city_region %in% city_region_valid) %>% 
-  left_join(ML_hosts) %>% 
-  rename(total_host_listings = n) %>% 
-  left_join(local_hosts) %>% 
-  rename(total_local_listings = n) %>% 
-  select(property_ID, host_ID, total_host_listings, total_local_listings, everything()) %>% 
-  group_by(city, region) %>% 
-  summarize(active_listings = n(),
-            active_hosts          = length(unique(host_ID)),
-            listings_per_host     = active_listings / active_hosts,
-            EH_pct         = mean(listing_type == "Entire home/apt"),
-            ML_host_pct    = mean(total_host_listings > 1, na.rm = TRUE),
-            local_host_pct = mean(total_local_listings > 1, na.rm = TRUE),
-            only_nonlocal_pct = mean(total_local_listings == 1 & total_host_listings > 1, na.rm = TRUE)) %>%
-  write_csv("output.csv")
-
-
 ## Function to find local and nonlocal host IDs
 
 nonlocal_active_hosts <- function(cityx){
@@ -154,12 +115,52 @@ nonlocal_hosts <- map_df(city_names, nonlocal_active_hosts)
 # Want: total number of hosts per city with count_nonlocal > 1
 
 nonlocal_hosts_gr <- nonlocal_hosts %>% 
-  group_by(city, region, host_ID) %>% 
-  summarize(count_local = sum(count_local), 
-            count_nonlocal = sum(count_nonlocal)) %>% 
-  arrange(host_ID)
-  
+  group_by(city, region) %>% 
+  summarize(
+    sum_nonlocal_hosts = length(unique(host_ID)),
+    sum_nonlocal = sum(count_nonlocal > 1)) # %>% 
+arrange(host_ID)
 
-length(unique(nonlocal_hosts_gr$host_ID))
+# length(unique(nonlocal_hosts_gr$host_ID))
+
+## Calculate only local hosts 
+# Something goes wrong here - after the 2nd left_join df has 14991 rows, but
+# one implementing the 2nd filter, it becomes almost the same # of rows as 
+# local_hosts, and the summarize gives unique host_ID length of one less than
+# total_local_listings for each row. So these numbers don't make sense.
+
+# only_local_hosts <- 
+#   ML_property %>% 
+#   filter(created <= "2019-09-30", scraped >= "2019-09-30") %>% 
+#   count(host_ID, city, region) %>% 
+#   left_join(ML_hosts_with_city) %>% 
+#   left_join(local_hosts, na.rm = TRUE) %>% 
+#   filter(total_host_listings == total_local_listings) %>% 
+#   group_by(city, region) %>% 
+#   summarize(only_local_hosts = length(unique(host_ID)))
+
+## Property output 
+
+property_output <- 
+  property_cities %>% 
+  filter(created <= "2019-09-30", scraped >= "2019-09-30") %>% 
+  mutate(city_region = paste(city, region, sep = ", ")) %>% 
+  filter(city_region %in% city_region_valid) %>% 
+  left_join(ML_hosts) %>% 
+  left_join(local_hosts) %>% 
+  left_join(nonlocal_hosts_gr) %>% 
+  select(property_ID, host_ID, sum_nonlocal_hosts, total_host_listings, total_local_listings, everything()) %>% 
+  group_by(city, region, sum_nonlocal_hosts) %>% 
+  summarize(active_listings = n(),
+            active_hosts          = length(unique(host_ID)),
+            listings_per_host     = active_listings / active_hosts,
+            EH_pct         = mean(listing_type == "Entire home/apt"),
+            ML_host_pct    = mean(total_host_listings > 1, na.rm = TRUE),
+            local_host_pct = mean(total_local_listings > 1, na.rm = TRUE)) %>% 
+  mutate(pct_active_nonlocal = (sum_nonlocal_hosts/active_hosts)) #%>%
+  write_csv("output.csv")
+
+
+
 
 
